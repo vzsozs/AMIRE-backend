@@ -48,24 +48,23 @@ const saveData = () => {
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 };
 
+// --- Autentikációs Middleware ---
 // Ez a függvény minden '/api/' útvonalra érkező kérést ellenőrizni fog
 const authenticateToken = (req, res, next) => {
-    // Ellenőrizzük, hogy a kérés a '/api/login' végpontra érkezett-e
-    // A login kérésnek nem kell token!
+    // FONTOS JAVÍTÁS: A LOGIN VÉGPONT KIZÁRÁSA
     if (req.path === '/api/login') {
-        return next();
+        return next(); // Ha login kérés, NEM KELL TOKEN, folytatjuk
     }
 
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // Formátum: "Bearer TOKEN"
+    const token = authHeader && authHeader.split(' ')[1];
 
     if (token == null) {
         return res.status(401).json({ message: 'Hozzáférés megtagadva: Hiányzó token.' });
     }
 
-    // Egyszerű token ellenőrzés
     if (token === FAKE_TOKEN) {
-        next(); // Token érvényes, folytatjuk a kéréssel
+        next();
     } else {
         return res.status(403).json({ message: 'Hozzáférés megtagadva: Érvénytelen token.' });
     }
@@ -77,12 +76,8 @@ app.use('/api', authenticateToken);
 // --- API végpontok: LOGIN ---
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
-
     if (username === USERNAME && password === PASSWORD) {
-        // Egy egyszerű token, amit a frontend tárolhat
-        // Élesben egy JWT (JSON Web Token) lenne itt
-        const token = 'fake-jwt-token-for-amire'; 
-        return res.json({ message: 'Sikeres bejelentkezés!', token });
+        return res.json({ message: 'Sikeres bejelentkezés!', token: FAKE_TOKEN });
     } else {
         return res.status(401).json({ message: 'Hibás felhasználónév vagy jelszó.' });
     }
