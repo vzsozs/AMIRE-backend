@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
-const PORT = 3001; // Frontend: 5173
+const PORT = 3001;
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -15,6 +15,7 @@ const DB_FILE = path.join(__dirname, 'db.json');
 // --- Helyi, ideiglenes felhasználónév és jelszó ---
 const USERNAME = 'amire'; // Cseréld le, ha akarod
 const PASSWORD = 'ErimA-2025'; // Cseréld le egy erősebbre! NE EZT HASZNÁLD ÉLESBEN!
+const FAKE_TOKEN = 'fake-jwt-token-for-amire'; // Ugyanaz a token, mint a frontendben
 // ----------------------------------------------------
 
 
@@ -46,6 +47,32 @@ const loadData = () => {
 const saveData = () => {
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 };
+
+// Ez a függvény minden '/api/' útvonalra érkező kérést ellenőrizni fog
+const authenticateToken = (req, res, next) => {
+    // Ellenőrizzük, hogy a kérés a '/api/login' végpontra érkezett-e
+    // A login kérésnek nem kell token!
+    if (req.path === '/api/login') {
+        return next();
+    }
+
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; // Formátum: "Bearer TOKEN"
+
+    if (token == null) {
+        return res.status(401).json({ message: 'Hozzáférés megtagadva: Hiányzó token.' });
+    }
+
+    // Egyszerű token ellenőrzés
+    if (token === FAKE_TOKEN) {
+        next(); // Token érvényes, folytatjuk a kéréssel
+    } else {
+        return res.status(403).json({ message: 'Hozzáférés megtagadva: Érvénytelen token.' });
+    }
+};
+
+// Alkalmazzuk az autentikációs middleware-t az összes '/api/' útvonalra
+app.use('/api', authenticateToken);
 
 // --- API végpontok: LOGIN ---
 app.post('/api/login', (req, res) => {
