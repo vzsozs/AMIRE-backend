@@ -71,7 +71,7 @@ app.post('/api/login', (req, res) => {
 
     // FONTOS HIBAKERESÉS: LOGOLJUK KI A BEÉRKEZŐ ADATOKAT!
     // Ha az express.json() működik, akkor itt látni fogjuk a felhasználónevet és jelszót.
-    console.log(`[BACKEND] Login kérés érkezett. req.body:`, req.body);
+    console.log(`[BACKEND] Zsozs ez a login kérés érkezett. req.body:`, req.body);
     console.log(`[BACKEND] Backend beállított felhasználónév: "${USERNAME}", Jelszó: "${PASSWORD}"`);
 
 
