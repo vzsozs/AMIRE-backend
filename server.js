@@ -165,6 +165,7 @@ app.get('/api/jobs', async (req, res) => {
 // Új munka hozzáadása
 app.post('/api/jobs', async (req, res) => {
     try {
+        // A frontend nem küld ID-t, a backend generálja
         const newJob = { id: Date.now(), ...req.body };
         await pool.query(
             `INSERT INTO jobs (id, title, status, deadline, description, assignedTeam, schedule, color, todoList)
@@ -236,6 +237,7 @@ app.get('/api/team', async (req, res) => {
 // Új csapattag hozzáadása
 app.post('/api/team', async (req, res) => {
     try {
+        // A frontend nem küld ID-t, a backend generálja
         const newMember = { id: Date.now(), ...req.body };
         await pool.query(
             `INSERT INTO team (id, name, role, color, phone, email, availability)
