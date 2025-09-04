@@ -1,25 +1,29 @@
 const express = require('express');
 const cors = require('cors');
-// const bodyParser = require('body-parser'); // FONTOS: EZT A SORT TÖRÖLD VAGY KOMMENTELD KI
 const fs = require('fs');
 const path = require('path');
 
 const app = express();
-const PORT = 3001;
+const PORT = 3001; // A backend egy másik porton fut, mint a frontend
 
-app.use(cors());
-// FONTOS: A bodyParser.json() helyett az express.json()-t használjuk
-app.use(express.json()); // EZT HASZNÁLJUK HELYETTE
+// --- Middleware-ek ---
+app.use(cors()); // Engedélyezzük a CORS-t, hogy a frontendről is lehessen hívni
+app.use(express.json()); // JSON formátumú kérések feldolgozása (Express beépített body-parser)
 
-const DB_FILE = path.join(__dirname, 'db.json');
+// --- Konfiguráció ---
+const DB_FILE = path.join(__dirname, 'db.json'); // Az "adatbázis" fájl elérési útja
 
-const USERNAME = 'amire'; // PONTOSAN a frontendről küldött felhasználónév
-const PASSWORD = 'ErimA-2025'; // PONTOSAN a frontendről küldött jelszó
-const FAKE_TOKEN = 'fake-jwt-token-for-amire';
-// ----------------------------------------------------
+// FONTOS: Felhasználónév, jelszó és token környezeti változókból!
+// Ha Render-en vagy, ezeket ott kell beállítani a 'Environment' fülön.
+// Ha helyi gépen futtatod, egy '.env' fájlt kell létrehozni a backend mappában.
+const USERNAME = process.env.AMIRE_USERNAME || 'amire_default'; // Alapértelmezett, ha nincs beállítva
+const PASSWORD = process.env.AMIRE_PASSWORD || 'default_password_2025'; // Alapértelmezett, ha nincs beállítva
+const FAKE_TOKEN = process.env.AMIRE_FAKE_TOKEN || 'amire-secret-token-xyz'; // Alapértelmezett, ha nincs beállítva
+const APP_VERSION = '1.0.0'; // Alkalmazás verziószám
 
-
-// Kezdeti adatok, ha a db.json még nem létezik
+// --- Kezdeti adatok, ha a db.json még nem létezik ---
+// EZEKET PONTOSAN AZ initialJobs ÉS initialTeam LISTÁIDNAK KELL LENNIEK AZ App.jsx-ből!
+// A localStorage-ban a token tárolódik, ha bejelentkezünk.
 let data = {
     jobs: [
         { id: 1, title: 'Gábor Lakásfelújítás', status: 'Folyamatban', deadline: '2025-09-15', description: 'Teljes lakásfestés, glettelés és mázolás.', assignedTeam: [1, 4], schedule: ['2025-09-01', '2025-09-02', '2025-09-03', '2025-09-04'], color: '#FF6F00', todoList: [{ id: 101, text: 'Megvenni a festéket', completed: true }, { id: 102, text: 'Glettelni a falakat', completed: false }, { id: 103, text: 'Fóliázás és takarás', completed: false }] },
@@ -35,86 +39,103 @@ let data = {
     ],
 };
 
+// Adatok betöltése a JSON fájlból induláskor
 const loadData = () => {
     if (fs.existsSync(DB_FILE)) {
-        const rawData = fs.readFileSync(DB_FILE);
-        data = JSON.parse(rawData);
+        try {
+            const rawData = fs.readFileSync(DB_FILE, 'utf8');
+            data = JSON.parse(rawData);
+            // console.log('[BACKEND] Adatok betöltve a db.json-ból.'); // Debug
+        } catch (error) {
+            console.error('[BACKEND] Hiba a db.json olvasása vagy feldolgozása során:', error);
+            saveData(); // Létrehozunk egy új fájlt, ha a régi hibás
+        }
     } else {
-        saveData();
+        // console.log('[BACKEND] db.json fájl nem található, létrehozzuk az alap adatokkal.'); // Debug
+        saveData(); // Létrehozzuk a fájlt az alap adatokkal
     }
 };
 
+// Adatok mentése a JSON fájlba
 const saveData = () => {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+    try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2)); // Szépen formázva írjuk ki
+        // console.log('[BACKEND] Adatok sikeresen elmentve a db.json-ba.'); // Debug
+    } catch (error) {
+        console.error('[BACKEND] Hiba a db.json mentése során:', error);
+    }
 };
 
+// --- Autentikációs Middleware ---
+// Ellenőrzi a token érvényességét minden /api/ kérésnél, kivéve a login-t
 const authenticateToken = (req, res, next) => {
-    // FONTOS JAVÍTÁS: A LOGIN VÉGPONT KIZÁRÁSA
-    // Mivel az app.use('/api', authenticateToken) miatt az '/api' részt már levágták,
-    // a req.path itt csak '/login' lesz.
-    if (req.path === '/login') { // EZ A JAVÍTOTT FELTÉTEL!
-        console.log("[BACKEND] Login kérés: Token ellenőrzés kihagyva.");
-        return next(); // Ha login kérés, NEM KELL TOKEN, folytatjuk
+    // A login és verzió végpontoknak nem kell token
+    if (req.path === '/login' || req.path === '/version') {
+        return next();
     }
 
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    const token = authHeader && authHeader.split(' ')[1]; // "Bearer TOKEN" formátum
 
     if (token == null) {
-        console.log("[BACKEND] Hiba: Hiányzó token a nem-login kérésben.");
+        // console.log('[BACKEND] Hiba (401): Hiányzó token a nem-login kérésben.'); // Debug
         return res.status(401).json({ message: 'Hozzáférés megtagadva: Hiányzó token.' });
     }
 
-    if (token === FAKE_TOKEN) {
-        console.log("[BACKEND] Token érvényes, folytatjuk a kéréssel.");
-        next();
+    if (token === FAKE_TOKEN) { // Egyszerű token ellenőrzés
+        next(); // Token érvényes, folytatjuk a kéréssel
     } else {
-        console.log("[BACKEND] Hiba: Érvénytelen token.");
+        // console.log('[BACKEND] Hiba (403): Érvénytelen token.'); // Debug
         return res.status(403).json({ message: 'Hozzáférés megtagadva: Érvénytelen token.' });
     }
 };
 
+// --- Alkalmazzuk a middleware-t ---
 app.use('/api', authenticateToken);
 
+// --- API végpontok: LOGIN ---
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
 
-    // FONTOS HIBAKERESÉS: LOGOLJUK KI A BEÉRKEZŐ ADATOKAT!
-    // Ha az express.json() működik, akkor itt látni fogjuk a felhasználónevet és jelszót.
-    console.log(`[BACKEND] Zsozs ez a login kérés érkezett. req.body:`, req.body);
-    console.log(`[BACKEND] Backend beállított felhasználónév: "${USERNAME}", Jelszó: "${PASSWORD}"`);
-
+    // console.log(`[BACKEND] Login kérés érkezett. Felhasználónév: "${username}", Jelszó: "${password}"`); // Debug
+    // console.log(`[BACKEND] Backend beállított felhasználónév: "${USERNAME}", Jelszó: "${PASSWORD}"`); // Debug
 
     if (username === USERNAME && password === PASSWORD) {
-        console.log("[BACKEND] Sikeres bejelentkezés a backendről.");
-        return res.json({ message: 'Sikeres bejelentkezés!', token: FAKE_TOKEN });
+        // console.log("[BACKEND] Sikeres bejelentkezés."); // Debug
+        return res.json({ message: 'Sikeres bejelentkezés!', token: FAKE_TOKEN, version: APP_VERSION }); // Verziószám is hozzáadva
     } else {
-        console.log("[BACKEND] Sikertelen bejelentkezés a backendről.");
+        // console.log("[BACKEND] Sikertelen bejelentkezés."); // Debug
         return res.status(401).json({ message: 'Hibás felhasználónév vagy jelszó.' });
     }
 });
 
+// --- API végpontok: VERZIÓ ---
+app.get('/api/version', (req, res) => {
+    res.json({ version: APP_VERSION });
+});
+
 // --- API végpontok: MUNKÁK (jobs) ---
 
-// Munkák lekérése (READ - GET)
+// Munkák lekérése
 app.get('/api/jobs', (req, res) => {
     res.json(data.jobs);
 });
 
-// Új munka hozzáadása (CREATE - POST)
+// Új munka hozzáadása
 app.post('/api/jobs', (req, res) => {
     const newJob = { id: Date.now(), ...req.body };
     data.jobs.push(newJob);
     saveData();
-    res.status(201).json(newJob); // 201 Created státusz
+    res.status(201).json(newJob);
 });
 
-// Munka frissítése (UPDATE - PUT)
+// Munka frissítése
 app.put('/api/jobs/:id', (req, res) => {
     const jobId = Number(req.params.id);
     const jobIndex = data.jobs.findIndex(job => job.id === jobId);
 
     if (jobIndex === -1) {
+        // console.log(`[BACKEND] Hiba: Munka (ID: ${jobId}) nem található frissítéskor.`); // Debug
         return res.status(404).json({ message: 'Munka nem található.' });
     }
 
@@ -123,27 +144,28 @@ app.put('/api/jobs/:id', (req, res) => {
     res.json(data.jobs[jobIndex]);
 });
 
-// Munka törlése (DELETE - DELETE)
+// Munka törlése
 app.delete('/api/jobs/:id', (req, res) => {
     const jobId = Number(req.params.id);
     const initialLength = data.jobs.length;
     data.jobs = data.jobs.filter(job => job.id !== jobId);
 
     if (data.jobs.length === initialLength) {
+        // console.log(`[BACKEND] Hiba: Munka (ID: ${jobId}) nem található törléskor.`); // Debug
         return res.status(404).json({ message: 'Munka nem található.' });
     }
     saveData();
-    res.status(204).send(); // 204 No Content státusz
+    res.status(204).send();
 });
 
 // --- API végpontok: CSAPAT (team) ---
 
-// Csapat lekérése (READ - GET)
+// Csapat lekérése
 app.get('/api/team', (req, res) => {
     res.json(data.team);
 });
 
-// Új csapattag hozzáadása (CREATE - POST)
+// Új csapattag hozzáadása
 app.post('/api/team', (req, res) => {
     const newMember = { id: Date.now(), ...req.body };
     data.team.push(newMember);
@@ -151,12 +173,13 @@ app.post('/api/team', (req, res) => {
     res.status(201).json(newMember);
 });
 
-// Csapattag frissítése (UPDATE - PUT)
+// Csapattag frissítése
 app.put('/api/team/:id', (req, res) => {
     const memberId = Number(req.params.id);
     const memberIndex = data.team.findIndex(member => member.id === memberId);
 
     if (memberIndex === -1) {
+        // console.log(`[BACKEND] Hiba: Csapattag (ID: ${memberId}) nem található frissítéskor.`); // Debug
         return res.status(404).json({ message: 'Csapattag nem található.' });
     }
 
@@ -165,13 +188,14 @@ app.put('/api/team/:id', (req, res) => {
     res.json(data.team[memberIndex]);
 });
 
-// Csapattag törlése (DELETE - DELETE)
+// Csapattag törlése
 app.delete('/api/team/:id', (req, res) => {
     const memberId = Number(req.params.id);
     const initialLength = data.team.length;
     data.team = data.team.filter(member => member.id !== memberId);
 
     if (data.team.length === initialLength) {
+        // console.log(`[BACKEND] Hiba: Csapattag (ID: ${memberId}) nem található törléskor.`); // Debug
         return res.status(404).json({ message: 'Csapattag nem található.' });
     }
     saveData();
@@ -182,5 +206,5 @@ app.delete('/api/team/:id', (req, res) => {
 // Server indítása
 app.listen(PORT, () => {
     loadData();
-    console.log(`Backend server running on http://localhost:${PORT}`);
+    console.log(`[BACKEND] Server running on http://localhost:${PORT}, Version: ${APP_VERSION}`);
 });
