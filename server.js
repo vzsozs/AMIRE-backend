@@ -49,17 +49,27 @@ const saveData = () => {
 };
 
 const authenticateToken = (req, res, next) => {
-    if (req.path === '/api/login') {
-        return next();
+    // FONTOS JAVÍTÁS: A LOGIN VÉGPONT KIZÁRÁSA
+    // Mivel az app.use('/api', authenticateToken) miatt az '/api' részt már levágták,
+    // a req.path itt csak '/login' lesz.
+    if (req.path === '/login') { // EZ A JAVÍTOTT FELTÉTEL!
+        console.log("[BACKEND] Login kérés: Token ellenőrzés kihagyva.");
+        return next(); // Ha login kérés, NEM KELL TOKEN, folytatjuk
     }
+
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
+
     if (token == null) {
+        console.log("[BACKEND] Hiba: Hiányzó token a nem-login kérésben.");
         return res.status(401).json({ message: 'Hozzáférés megtagadva: Hiányzó token.' });
     }
+
     if (token === FAKE_TOKEN) {
+        console.log("[BACKEND] Token érvényes, folytatjuk a kéréssel.");
         next();
     } else {
+        console.log("[BACKEND] Hiba: Érvénytelen token.");
         return res.status(403).json({ message: 'Hozzáférés megtagadva: Érvénytelen token.' });
     }
 };
