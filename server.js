@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg'); // PostgreSQL kliens
-const path = require('path');
 
 const app = express();
 const PORT = 3001; // A backend egy másik porton fut, mint a frontend
@@ -11,39 +10,36 @@ app.use(cors()); // Engedélyezzük a CORS-t, hogy a frontendről is lehessen h�
 app.use(express.json()); // JSON formátumú kérések feldolgozása (Express beépített body-parser)
 
 // --- Konfiguráció ---
-const DB_FILE = path.join(__dirname, 'db.json'); // Az "adatbázis" fájl elérési útja
+// FONTOS: PostgreSQL adatbázis URL környezeti változóból!
+// Ezt a Render-en kell beállítani a 'Environment' fülön.
+const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://user:password@localhost:5432/database'; 
 
 // FONTOS: Felhasználónév, jelszó és token környezeti változókból!
-// Ha Render-en vagy, ezeket ott kell beállítani a 'Environment' fülön.
-// Ha helyi gépen futtatod, egy '.env' fájlt kell létrehozni a backend mappában.
 const USERNAME = process.env.AMIRE_USERNAME || 'admin'; // DEFAULT: admin
 const PASSWORD = process.env.AMIRE_PASSWORD || 'admin'; // DEFAULT: admin
 const FAKE_TOKEN = process.env.AMIRE_FAKE_TOKEN || 'amire-secret-token-xyz';
 const APP_VERSION = '1.0.0'; // Alkalmazás verziószám
 
-// --- Kezdeti adatok, ha a db.json még nem létezik ---
-// EZEKET PONTOSAN AZ initialJobs ÉS initialTeam LISTÁIDNAK KELL LENNIEK AZ App.jsx-ből!
-let data = { // EZ AZ OBJEKTUM HIÁNYZOTT
-    jobs: [
-        { id: 1, title: 'Teszt munka', status: 'Folyamatban', deadline: '2025-09-10', description: 'Ez egy alapértelmezett teszt munka.', assignedTeam: [1], schedule: ['2025-09-01', '2025-09-02'], color: '#FF6F00', todoList: [{ id: 101, text: 'Teszt feladat', completed: false }] },
-    ],
-    team: [
-        { id: 1, name: 'Béla', role: 'Segédmunkás', color: '#1E88E5', phone: '+36701234567', email: 'bela@amire.hu', availability: ['2025-09-01', '2025-09-02'] },
-    ],
-}; // <<< ITT VOLT A HIBA: EGY PLUSZ ZÁRÓJEL ÉS A pool definíciója is feljebb volt
-
+// --- Kezdeti adatok (DEFAULT), ha az adatbázis üres ---
+const initialJobs = [
+    { id: 1, title: 'Teszt munka', status: 'Folyamatban', deadline: '2025-09-10', description: 'Ez egy alapértelmezett teszt munka.', assignedTeam: [1], schedule: ['2025-09-01', '2025-09-02'], color: '#FF6F00', todoList: [{ id: 101, text: 'Teszt feladat', completed: false }] },
+];
+const initialTeam = [
+    { id: 1, name: 'Béla', role: 'Segédmunkás', color: '#1E88E5', phone: '+36701234567', email: 'bela@amire.hu', availability: ['2025-09-01', '2025-09-02'] },
+];
 
 // --- PostgreSQL Pool létrehozása ---
 const pool = new Pool({
     connectionString: DATABASE_URL,
     ssl: {
-        rejectUnauthorized: false // Szükséges a Render SSL-hez
+        rejectUnauthorized: false // Szükséges a Render SSL-hez, ha nincs CA tanúsítvány
     }
 });
 
 // --- Adatbázis inicializálása (táblák létrehozása, ha nem léteznek) ---
 const initializeDatabase = async () => {
     try {
+        // Táblák létrehozása
         await pool.query(`
             CREATE TABLE IF NOT EXISTS jobs (
                 id BIGINT PRIMARY KEY,
@@ -54,7 +50,7 @@ const initializeDatabase = async () => {
                 assignedTeam BIGINT[],
                 schedule VARCHAR(10)[],
                 color VARCHAR(7),
-                todoList JSONB
+                todoList JSONB -- JSONB típus a JSON objektumok tárolására
             );
             CREATE TABLE IF NOT EXISTS team (
                 id BIGINT PRIMARY KEY,
@@ -68,22 +64,18 @@ const initializeDatabase = async () => {
         `);
         console.log('[BACKEND] Adatbázis táblák ellenőrizve/létrehozva.');
 
-        const jobCount = (await pool.query('SELECT COUNT(*) FROM jobs')).rows[0].count;
-        const teamCount = (await pool.query('SELECT COUNT(*) FROM team')).rows[0].count;
+        const jobCountResult = await pool.query('SELECT COUNT(*) FROM jobs');
+        const jobCount = parseInt(jobCountResult.rows[0].count, 10); // Konvertálás számmá
+        
+        const teamCountResult = await pool.query('SELECT COUNT(*) FROM team');
+        const teamCount = parseInt(teamCountResult.rows[0].count, 10); // Konvertálás számmá
 
-        if (jobCount == 0 || teamCount == 0) { // FONTOS: VAGY (OR)
-            console.log('[BACKEND] Adatbázis üres, vagy valamelyik tábla üres, alap adatok beszúrása.');
-            // FONTOS: Most a meglévő adatokat töröljük, ha üres a tábla, majd újra beszúrjuk.
-            // Ez biztosítja, hogy a default adatok mindig a legfrissebbek legyenek.
-            if (jobCount == 0) {
-                await pool.query('DELETE FROM jobs');
-                console.log('[BACKEND] Meglévő munkák törölve az alap adatok beszúrása előtt.');
-            }
-            if (teamCount == 0) {
-                await pool.query('DELETE FROM team');
-                console.log('[BACKEND] Meglévő csapattagok törölve az alap adatok beszúrása előtt.');
-            }
+        // Csak akkor szúrunk be alap adatokat, ha MINDEN tábla üres
+        if (jobCount === 0 && teamCount === 0) {
+            console.log('[BACKEND] Adatbázis üres, alap adatok beszúrása.');
             await insertInitialData();
+        } else {
+            console.log(`[BACKEND] Adatbázis már tartalmaz adatokat. Munkák: ${jobCount}, Csapat: ${teamCount}.`);
         }
 
     } catch (error) {
@@ -92,18 +84,14 @@ const initializeDatabase = async () => {
 };
 
 const insertInitialData = async () => {
-    // FONTOS: Ezek a listák most már a 'data' objektum global scope-ból jönnek
-    // (a fájl elején definiált initialJobs és initialTeam listák, amit a 'data' objektumba tettünk).
-    // Itt a 'data.jobs' és 'data.team' listát kell használni!
-
-    for (const job of data.jobs) { // HASZNÁLJUK A 'data.jobs'-t
+    for (const job of initialJobs) { // Használjuk a fájl elején definiált initialJobs-ot
         await pool.query(
             `INSERT INTO jobs (id, title, status, deadline, description, assignedTeam, schedule, color, todoList)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [job.id, job.title, job.status, job.deadline, job.description, job.assignedTeam, job.schedule, job.color, JSON.stringify(job.todoList)]
         );
     }
-    for (const member of data.team) { // HASZNÁLJUK A 'data.team'-et
+    for (const member of initialTeam) { // Használjuk a fájl elején definiált initialTeam-et
         await pool.query(
             `INSERT INTO team (id, name, role, color, phone, email, availability)
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -114,21 +102,24 @@ const insertInitialData = async () => {
 };
 
 // --- Autentikációs Middleware ---
+// Ellenőrzi a token érvényességét minden /api/ kérésnél, kivéve a login-t
 const authenticateToken = (req, res, next) => {
     if (req.path === '/login' || req.path === '/version') {
         return next();
     }
 
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    const token = authHeader && authHeader.split(' ')[1]; // "Bearer TOKEN" formátum
 
     if (token == null) {
+        console.log('[BACKEND] Hiba (401): Hiányzó token a nem-login kérésben.');
         return res.status(401).json({ message: 'Hozzáférés megtagadva: Hiányzó token.' });
     }
 
-    if (token === FAKE_TOKEN) {
+    if (token === FAKE_TOKEN) { // Egyszerű token ellenőrzés
         next();
     } else {
+        console.log('[BACKEND] Hiba (403): Érvénytelen token.');
         return res.status(403).json({ message: 'Hozzáférés megtagadva: Érvénytelen token.' });
     }
 };
@@ -247,7 +238,7 @@ app.post('/api/team', async (req, res) => {
         await pool.query(
             `INSERT INTO team (id, name, role, color, phone, email, availability)
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [newMember.id, newMember.name, newMember.id, newMember.role, newMember.color, newMember.phone, newMember.email, newMember.availability]
+            [newMember.id, newMember.name, newMember.role, newMember.color, newMember.phone, newMember.email, newMember.availability]
         );
         res.status(201).json(newMember);
     } catch (error) {
