@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const bodyParser = require('body-parser');
+// const bodyParser = require('body-parser'); // FONTOS: EZT A SORT TÖRÖLD VAGY KOMMENTELD KI
 const fs = require('fs');
 const path = require('path');
 
@@ -8,14 +8,14 @@ const app = express();
 const PORT = 3001;
 
 app.use(cors());
-app.use(bodyParser.json());
+// FONTOS: A bodyParser.json() helyett az express.json()-t használjuk
+app.use(express.json()); // EZT HASZNÁLJUK HELYETTE
 
 const DB_FILE = path.join(__dirname, 'db.json');
 
-// --- Helyi, ideiglenes felhasználónév és jelszó ---
-const USERNAME = 'amire'; // Cseréld le, ha akarod
-const PASSWORD = 'ErimA-2025'; // Cseréld le egy erősebbre! NE EZT HASZNÁLD ÉLESBEN!
-const FAKE_TOKEN = 'fake-jwt-token-for-amire'; // Ugyanaz a token, mint a frontendben
+const USERNAME = 'amire'; // PONTOSAN a frontendről küldött felhasználónév
+const PASSWORD = 'ErimA-2025'; // PONTOSAN a frontendről küldött jelszó
+const FAKE_TOKEN = 'fake-jwt-token-for-amire';
 // ----------------------------------------------------
 
 
@@ -48,21 +48,15 @@ const saveData = () => {
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 };
 
-// --- Autentikációs Middleware ---
-// Ez a függvény minden '/api/' útvonalra érkező kérést ellenőrizni fog
 const authenticateToken = (req, res, next) => {
-    // FONTOS JAVÍTÁS: A LOGIN VÉGPONT KIZÁRÁSA
     if (req.path === '/api/login') {
-        return next(); // Ha login kérés, NEM KELL TOKEN, folytatjuk
+        return next();
     }
-
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-
     if (token == null) {
         return res.status(401).json({ message: 'Hozzáférés megtagadva: Hiányzó token.' });
     }
-
     if (token === FAKE_TOKEN) {
         next();
     } else {
@@ -70,22 +64,22 @@ const authenticateToken = (req, res, next) => {
     }
 };
 
-// Alkalmazzuk az autentikációs middleware-t az összes '/api/' útvonalra
 app.use('/api', authenticateToken);
 
-// --- API végpontok: LOGIN ---
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
 
-    // HIBAKERESÉS: LOGOLJUK KI A BEÉRKEZŐ ADATOKAT!
-    console.log(`Login kérés érkezett. Felhasználónév: "${username}", Jelszó: "${password}"`);
-    console.log(`Backend beállított felhasználónév: "${USERNAME}", Jelszó: "${PASSWORD}"`);
+    // FONTOS HIBAKERESÉS: LOGOLJUK KI A BEÉRKEZŐ ADATOKAT!
+    // Ha az express.json() működik, akkor itt látni fogjuk a felhasználónevet és jelszót.
+    console.log(`[BACKEND] Login kérés érkezett. req.body:`, req.body);
+    console.log(`[BACKEND] Backend beállított felhasználónév: "${USERNAME}", Jelszó: "${PASSWORD}"`);
+
 
     if (username === USERNAME && password === PASSWORD) {
-        console.log("Sikeres bejelentkezés a backendről.");
+        console.log("[BACKEND] Sikeres bejelentkezés a backendről.");
         return res.json({ message: 'Sikeres bejelentkezés!', token: FAKE_TOKEN });
     } else {
-        console.log("Sikertelen bejelentkezés a backendről.");
+        console.log("[BACKEND] Sikertelen bejelentkezés a backendről.");
         return res.status(401).json({ message: 'Hibás felhasználónév vagy jelszó.' });
     }
 });
