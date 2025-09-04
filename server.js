@@ -149,9 +149,11 @@ app.get('/api/version', (req, res) => {
 app.get('/api/jobs', async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM jobs');
+        // A todoList JSONB oszlopot vissza kell alakítani JSON objektummá
         const jobs = result.rows.map(job => ({
             ...job,
-            todolist: job.todolist || [] // Biztosítjuk, hogy mindig tömb legyen
+            // FONTOS: A PostgreSQL `todolist` oszlopnevét `todoList`-re alakítjuk!
+            todoList: job.todolist || [] // Biztosítjuk, hogy mindig tömb legyen
         }));
         res.json(jobs);
     } catch (error) {
@@ -194,7 +196,7 @@ app.put('/api/jobs/:id', async (req, res) => {
             console.log(`[BACKEND] Hiba: Munka (ID: ${jobId}) nem található frissítéskor.`);
             return res.status(404).json({ message: 'Munka nem található.' });
         }
-        res.json({ ...result.rows[0], todolist: result.rows[0].todolist || [] }); // Visszaadjuk a frissített objektumot
+        res.json({ ...result.rows[0], todoList: result.rows[0].todolist || [] }); // Itt is 'todoList'-et használunk!
     } catch (error) {
         console.error('[BACKEND] Hiba munka frissítésekor:', error);
         res.status(500).json({ message: 'Belső szerverhiba' });
