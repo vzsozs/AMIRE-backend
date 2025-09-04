@@ -77,15 +77,13 @@ app.use('/api', authenticateToken);
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
 
-    // FONTOS HIBAKERESÉS: LOGOLJUK KI A BEÉRKEZŐ ADATOKAT!
+    // HIBAKERESÉS: LOGOLJUK KI A BEÉRKEZŐ ADATOKAT!
     console.log(`Login kérés érkezett. Felhasználónév: "${username}", Jelszó: "${password}"`);
     console.log(`Backend beállított felhasználónév: "${USERNAME}", Jelszó: "${PASSWORD}"`);
 
-
     if (username === USERNAME && password === PASSWORD) {
-        const token = 'fake-jwt-token-for-amire';
         console.log("Sikeres bejelentkezés a backendről.");
-        return res.json({ message: 'Sikeres bejelentkezés!', token });
+        return res.json({ message: 'Sikeres bejelentkezés!', token: FAKE_TOKEN });
     } else {
         console.log("Sikertelen bejelentkezés a backendről.");
         return res.status(401).json({ message: 'Hibás felhasználónév vagy jelszó.' });
