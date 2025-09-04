@@ -4,21 +4,34 @@ const { Pool } = require('pg'); // PostgreSQL kliens
 const path = require('path');
 
 const app = express();
-const PORT = 3001;
+const PORT = 3001; // A backend egy másik porton fut, mint a frontend
 
-app.use(cors());
-app.use(express.json());
+// --- Middleware-ek ---
+app.use(cors()); // Engedélyezzük a CORS-t, hogy a frontendről is lehessen hívni
+app.use(express.json()); // JSON formátumú kérések feldolgozása (Express beépített body-parser)
 
 // --- Konfiguráció ---
-// FONTOS: PostgreSQL adatbázis URL környezeti változóból!
-// Ezt a Render-en kell beállítani a 'Environment' fülön.
-const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://user:password@localhost:5432/database'; 
+const DB_FILE = path.join(__dirname, 'db.json'); // Az "adatbázis" fájl elérési útja
 
 // FONTOS: Felhasználónév, jelszó és token környezeti változókból!
-const USERNAME = process.env.AMIRE_USERNAME || 'amire_default';
-const PASSWORD = process.env.AMIRE_PASSWORD || 'default_password_2025';
+// Ha Render-en vagy, ezeket ott kell beállítani a 'Environment' fülön.
+// Ha helyi gépen futtatod, egy '.env' fájlt kell létrehozni a backend mappában.
+const USERNAME = process.env.AMIRE_USERNAME || 'admin'; // DEFAULT: admin
+const PASSWORD = process.env.AMIRE_PASSWORD || 'admin'; // DEFAULT: admin
 const FAKE_TOKEN = process.env.AMIRE_FAKE_TOKEN || 'amire-secret-token-xyz';
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.0'; // Alkalmazás verziószám
+
+// --- Kezdeti adatok, ha a db.json még nem létezik ---
+// EZEKET PONTOSAN AZ initialJobs ÉS initialTeam LISTÁIDNAK KELL LENNIEK AZ App.jsx-ből!
+let data = { // EZ AZ OBJEKTUM HIÁNYZOTT
+    jobs: [
+        { id: 1, title: 'Teszt munka', status: 'Folyamatban', deadline: '2025-09-10', description: 'Ez egy alapértelmezett teszt munka.', assignedTeam: [1], schedule: ['2025-09-01', '2025-09-02'], color: '#FF6F00', todoList: [{ id: 101, text: 'Teszt feladat', completed: false }] },
+    ],
+    team: [
+        { id: 1, name: 'Béla', role: 'Segédmunkás', color: '#1E88E5', phone: '+36701234567', email: 'bela@amire.hu', availability: ['2025-09-01', '2025-09-02'] },
+    ],
+}; // <<< ITT VOLT A HIBA: EGY PLUSZ ZÁRÓJEL ÉS A pool definíciója is feljebb volt
+
 
 // --- PostgreSQL Pool létrehozása ---
 const pool = new Pool({
@@ -55,12 +68,21 @@ const initializeDatabase = async () => {
         `);
         console.log('[BACKEND] Adatbázis táblák ellenőrizve/létrehozva.');
 
-        // Kezdeti adatok beszúrása, ha az asztalok üresek
         const jobCount = (await pool.query('SELECT COUNT(*) FROM jobs')).rows[0].count;
         const teamCount = (await pool.query('SELECT COUNT(*) FROM team')).rows[0].count;
 
-        if (jobCount == 0 && teamCount == 0) {
-            console.log('[BACKEND] Adatbázis üres, alap adatok beszúrása.');
+        if (jobCount == 0 || teamCount == 0) { // FONTOS: VAGY (OR)
+            console.log('[BACKEND] Adatbázis üres, vagy valamelyik tábla üres, alap adatok beszúrása.');
+            // FONTOS: Most a meglévő adatokat töröljük, ha üres a tábla, majd újra beszúrjuk.
+            // Ez biztosítja, hogy a default adatok mindig a legfrissebbek legyenek.
+            if (jobCount == 0) {
+                await pool.query('DELETE FROM jobs');
+                console.log('[BACKEND] Meglévő munkák törölve az alap adatok beszúrása előtt.');
+            }
+            if (teamCount == 0) {
+                await pool.query('DELETE FROM team');
+                console.log('[BACKEND] Meglévő csapattagok törölve az alap adatok beszúrása előtt.');
+            }
             await insertInitialData();
         }
 
@@ -70,27 +92,18 @@ const initializeDatabase = async () => {
 };
 
 const insertInitialData = async () => {
-    const initialJobs = [
-        { id: 1, title: 'Gábor Lakásfelújítás', status: 'Folyamatban', deadline: '2025-09-01', description: 'Teljes lakásfestés, glettelés és mázolás.', assignedTeam: [1, 4], schedule: ['2025-09-01', '2025-09-02', '2025-09-03', '2025-09-04'], color: '#FF6F00', todoList: [{ id: 101, text: 'Megvenni a festéket', completed: true }, { id: 102, text: 'Glettelni a falakat', completed: false }, { id: 103, text: 'Fóliázás és takarás', completed: false }] },
-        { id: 2, title: 'Kovács Iroda Festés', status: 'Befejezve', deadline: '2025-08-20', description: 'Az iroda tárgyalójának és folyosójának tisztasági festése.', assignedTeam: [1], schedule: ['2025-08-18', '2025-08-19', '2025-08-20'], color: '#3F51B5', todoList: [{ id: 201, text: 'Elszállítani az irodabútorokat', completed: true }, { id: 202, text: 'Festés befejezése', completed: false }] },
-        { id: 3, title: 'Nagy Családi Ház Vízszerelés', status: 'Folyamatban', deadline: '2025-09-30', description: 'Fürdőszoba és konyha vízvezetékeinek cseréje.', assignedTeam: [2], schedule: ['2025-09-29', '2025-09-30'], color: '#00BCD4', todoList: [] },
-        { id: 4, title: 'Tervezési Fázis - Új Projekt', status: 'Függőben', deadline: '2025-10-05', description: 'Új építkezés előkészítése, anyagbeszerzés tervezése.', assignedTeam: [], schedule: [], color: '#8BC34A', todoList: [{ id: 401, text: 'Engedélyek beszerzése', completed: false }] },
-    ];
-    const initialTeam = [
-        { id: 1, name: 'Varga Béla', role: 'Festő, Mázoló', color: '#FF6F00', phone: '+36301234567', email: 'bela@amire.hu', availability: ['2025-09-01', '2025-09-16', '2025-09-17'] },
-        { id: 2, name: 'Kiss Mária', role: 'Vízvezeték-szerelő', color: '#1E88E5', phone: '+36301112222', email: 'maria@amire.hu', availability: ['2025-09-01', '2025-09-17', '2025-09-18', '2025-09-29', '2025-09-30'] },
-        { id: 3, name: 'Nagy Gábor', role: 'Projektvezető', color: '#00ACC1', phone: '+36209876543', email: 'gabor@amire.hu', availability: ['2025-09-01', '2025-09-22', '2025-09-23'] },
-        { id: 4, name: 'Horváth Éva', role: 'Segédmunkás', color: '#7CB342', phone: '', email: 'eva@amire.hu', availability: ['2025-09-01', '2025-09-16'] },
-    ];
+    // FONTOS: Ezek a listák most már a 'data' objektum global scope-ból jönnek
+    // (a fájl elején definiált initialJobs és initialTeam listák, amit a 'data' objektumba tettünk).
+    // Itt a 'data.jobs' és 'data.team' listát kell használni!
 
-    for (const job of initialJobs) {
+    for (const job of data.jobs) { // HASZNÁLJUK A 'data.jobs'-t
         await pool.query(
             `INSERT INTO jobs (id, title, status, deadline, description, assignedTeam, schedule, color, todoList)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [job.id, job.title, job.status, job.deadline, job.description, job.assignedTeam, job.schedule, job.color, JSON.stringify(job.todoList)]
         );
     }
-    for (const member of initialTeam) {
+    for (const member of data.team) { // HASZNÁLJUK A 'data.team'-et
         await pool.query(
             `INSERT INTO team (id, name, role, color, phone, email, availability)
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -101,25 +114,21 @@ const insertInitialData = async () => {
 };
 
 // --- Autentikációs Middleware ---
-// Ellenőrzi a token érvényességét minden /api/ kérésnél, kivéve a login-t
 const authenticateToken = (req, res, next) => {
-    // A login és verzió végpontoknak nem kell token
     if (req.path === '/login' || req.path === '/version') {
         return next();
     }
 
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // "Bearer TOKEN" formátum
+    const token = authHeader && authHeader.split(' ')[1];
 
     if (token == null) {
-        // console.log('[BACKEND] Hiba (401): Hiányzó token a nem-login kérésben.'); // Debug
         return res.status(401).json({ message: 'Hozzáférés megtagadva: Hiányzó token.' });
     }
 
-    if (token === FAKE_TOKEN) { // Egyszerű token ellenőrzés
-        next(); // Token érvényes, folytatjuk a kéréssel
+    if (token === FAKE_TOKEN) {
+        next();
     } else {
-        // console.log('[BACKEND] Hiba (403): Érvénytelen token.'); // Debug
         return res.status(403).json({ message: 'Hozzáférés megtagadva: Érvénytelen token.' });
     }
 };
@@ -131,14 +140,9 @@ app.use('/api', authenticateToken);
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
 
-    // console.log(`[BACKEND] Login kérés érkezett. Felhasználónév: "${username}", Jelszó: "${password}"`); // Debug
-    // console.log(`[BACKEND] Backend beállított felhasználónév: "${USERNAME}", Jelszó: "${PASSWORD}"`); // Debug
-
     if (username === USERNAME && password === PASSWORD) {
-        // console.log("[BACKEND] Sikeres bejelentkezés."); // Debug
-        return res.json({ message: 'Sikeres bejelentkezés!', token: FAKE_TOKEN, version: APP_VERSION }); // Verziószám is hozzáadva
+        return res.json({ message: 'Sikeres bejelentkezés!', token: FAKE_TOKEN, version: APP_VERSION });
     } else {
-        // console.log("[BACKEND] Sikertelen bejelentkezés."); // Debug
         return res.status(401).json({ message: 'Hibás felhasználónév vagy jelszó.' });
     }
 });
@@ -154,7 +158,6 @@ app.get('/api/version', (req, res) => {
 app.get('/api/jobs', async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM jobs');
-        // A todoList JSONB oszlopot vissza kell alakítani JSON objektummá
         const jobs = result.rows.map(job => ({
             ...job,
             todolist: job.todolist || [] // Biztosítjuk, hogy mindig tömb legyen
@@ -244,7 +247,7 @@ app.post('/api/team', async (req, res) => {
         await pool.query(
             `INSERT INTO team (id, name, role, color, phone, email, availability)
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [newMember.id, newMember.name, newMember.role, newMember.color, newMember.phone, newMember.email, newMember.availability]
+            [newMember.id, newMember.name, newMember.id, newMember.role, newMember.color, newMember.phone, newMember.email, newMember.availability]
         );
         res.status(201).json(newMember);
     } catch (error) {
@@ -252,6 +255,7 @@ app.post('/api/team', async (req, res) => {
         res.status(500).json({ message: 'Belső szerverhiba' });
     }
 });
+
 // Csapattag frissítése
 app.put('/api/team/:id', async (req, res) => {
     try {
@@ -292,6 +296,7 @@ app.delete('/api/team/:id', async (req, res) => {
         res.status(500).json({ message: 'Belső szerverhiba' });
     }
 });
+
 
 // Server indítása
 app.listen(PORT, async () => { // Async függvény, mert initializeDatabase async
