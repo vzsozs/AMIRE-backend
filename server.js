@@ -16,8 +16,8 @@ const DB_FILE = path.join(__dirname, 'db.json'); // Az "adatbázis" fájl elér�
 // FONTOS: Felhasználónév, jelszó és token környezeti változókból!
 // Ha Render-en vagy, ezeket ott kell beállítani a 'Environment' fülön.
 // Ha helyi gépen futtatod, egy '.env' fájlt kell létrehozni a backend mappában.
-const USERNAME = process.env.AMIRE_USERNAME || 'amire_default'; // Alapértelmezett, ha nincs beállítva
-const PASSWORD = process.env.AMIRE_PASSWORD || 'default_password_2025'; // Alapértelmezett, ha nincs beállítva
+const USERNAME = process.env.AMIRE_USERNAME || 'amire'; // Alapértelmezett, ha nincs beállítva
+const PASSWORD = process.env.AMIRE_PASSWORD || 'erima2025'; // Alapértelmezett, ha nincs beállítva
 const FAKE_TOKEN = process.env.AMIRE_FAKE_TOKEN || 'amire-secret-token-xyz'; // Alapértelmezett, ha nincs beállítva
 const APP_VERSION = '1.0.0'; // Alkalmazás verziószám
 
