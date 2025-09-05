@@ -148,12 +148,19 @@ app.get('/api/version', (req, res) => {
 // Munkák lekérése
 app.post('/api/jobs', async (req, res) => {
     try {
-        const newJob = { id: Date.now(), ...req.body };
+        // A frontend nem küld ID-t, a backend generálja
+        const newJob = { 
+            id: Date.now(), 
+            ...req.body,
+            // Biztosítjuk, hogy a todoList mindig létezzen (üres tömbként), ha a frontend nem küldi
+            todoList: req.body.todoList || [] 
+        };
         console.log("[BACKEND] Új munka létrehozása. Adatok:", newJob);
         
         await pool.query(
             `INSERT INTO jobs (id, title, status, deadline, description, assignedTeam, schedule, color, todoList)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            // FONTOS: Itt a 'newJob.todoList'-et használjuk, nem a 'newJob.todolist'-et
             [newJob.id, newJob.title, newJob.status, newJob.deadline, newJob.description, newJob.assignedTeam, newJob.schedule, newJob.color, JSON.stringify(newJob.todoList)]
         );
         console.log("[BACKEND] Új munka sikeresen beszúrva az adatbázisba.");
