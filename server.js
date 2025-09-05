@@ -165,22 +165,44 @@ app.get('/api/jobs', async (req, res) => {
 // Új munka hozzáadása
 app.post('/api/jobs', async (req, res) => {
     try {
-        if (!req.body) {
-            console.error('[BACKEND] Hiba: Üres req.body a POST /api/jobs végponton.');
-            return res.status(400).json({ message: 'Hiányzó kérés törzs.' });
-        }
+        const { title, status, deadline, description, assignedTeam, schedule, color, todoList } = req.body;
 
-        const newJob = { 
-            id: Date.now(), 
-            ...req.body,
-            todoList: req.body.todoList || []
+        // FONTOS: Explicit adattípus-konverzió és alapértelmezett értékek
+        const newJob = {
+            id: Date.now(),
+            title: title || 'Nincs cím', // Biztosítjuk, hogy a title ne legyen undefined
+            status: status || 'Függőben',
+            deadline: deadline || null,
+            description: description || '',
+
+            // A tömböket átalakítjuk számokká, ha stringekként érkeznek
+            assignedTeam: Array.isArray(assignedTeam) ? assignedTeam.map(Number) : [], 
+            
+            // Biztosítjuk, hogy a tömbök létezzenek
+            schedule: schedule || [],
+            
+            color: color || '#607D8B',
+
+            // A todoList-et JSON stringgé alakítjuk, és biztosítjuk, hogy tömb legyen
+            todoList: todoList || []
         };
+
         console.log("[BACKEND] Új munka létrehozása. Adatok:", newJob);
         
         await pool.query(
             `INSERT INTO jobs (id, title, status, deadline, description, assignedTeam, schedule, color, todoList)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-            [newJob.id, newJob.title, newJob.status, newJob.deadline, newJob.description, newJob.assignedTeam, newJob.schedule, newJob.color, JSON.stringify(newJob.todoList)]
+            [
+                newJob.id, 
+                newJob.title, 
+                newJob.status, 
+                newJob.deadline, 
+                newJob.description, 
+                newJob.assignedTeam, 
+                newJob.schedule, 
+                newJob.color, 
+                JSON.stringify(newJob.todoList) // Stringgé alakítás
+            ]
         );
         console.log("[BACKEND] Új munka sikeresen beszúrva az adatbázisba.");
         
