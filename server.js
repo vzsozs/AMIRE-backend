@@ -146,18 +146,21 @@ app.get('/api/version', (req, res) => {
 // --- API végpontok: MUNKÁK (jobs) ---
 
 // Munkák lekérése
-app.get('/api/jobs', async (req, res) => {
+app.post('/api/jobs', async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM jobs');
-        // A todoList JSONB oszlopot vissza kell alakítani JSON objektummá
-        const jobs = result.rows.map(job => ({
-            ...job,
-            // FONTOS: A PostgreSQL `todolist` oszlopnevét `todoList`-re alakítjuk!
-            todoList: job.todolist || [] // Biztosítjuk, hogy mindig tömb legyen
-        }));
-        res.json(jobs);
+        const newJob = { id: Date.now(), ...req.body };
+        console.log("[BACKEND] Új munka létrehozása. Adatok:", newJob);
+        
+        await pool.query(
+            `INSERT INTO jobs (id, title, status, deadline, description, assignedTeam, schedule, color, todoList)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [newJob.id, newJob.title, newJob.status, newJob.deadline, newJob.description, newJob.assignedTeam, newJob.schedule, newJob.color, JSON.stringify(newJob.todoList)]
+        );
+        console.log("[BACKEND] Új munka sikeresen beszúrva az adatbázisba.");
+        
+        res.status(201).json(newJob);
     } catch (error) {
-        console.error('[BACKEND] Hiba munkák lekérésekor:', error);
+        console.error('[BACKEND] Hiba új munka hozzáadásakor:', error);
         res.status(500).json({ message: 'Belső szerverhiba' });
     }
 });
