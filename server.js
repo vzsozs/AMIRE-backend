@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg'); // PostgreSQL kliens
+const path = require('path');
 
 const app = express();
 const PORT = 3001; // A backend egy másik porton fut, mint a frontend
@@ -10,15 +11,11 @@ app.use(cors()); // Engedélyezzük a CORS-t, hogy a frontendről is lehessen h�
 app.use(express.json()); // JSON formátumú kérések feldolgozása (Express beépített body-parser)
 
 // --- Konfiguráció ---
-// FONTOS: PostgreSQL adatbázis URL környezeti változóból!
-// Ezt a Render-en kell beállítani a 'Environment' fülön.
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://user:password@localhost:5432/database'; 
-
-// FONTOS: Felhasználónév, jelszó és token környezeti változókból!
-const USERNAME = process.env.AMIRE_USERNAME || 'admin'; // DEFAULT: admin
-const PASSWORD = process.env.AMIRE_PASSWORD || 'admin'; // DEFAULT: admin
+const USERNAME = process.env.AMIRE_USERNAME || 'admin';
+const PASSWORD = process.env.AMIRE_PASSWORD || 'admin';
 const FAKE_TOKEN = process.env.AMIRE_FAKE_TOKEN || 'amire-secret-token-xyz';
-const APP_VERSION = '1.0.0'; // Alkalmazás verziószám
+const APP_VERSION = '1.0.0';
 
 // --- Kezdeti adatok (DEFAULT), ha az adatbázis üres ---
 const initialJobs = [
@@ -32,14 +29,13 @@ const initialTeam = [
 const pool = new Pool({
     connectionString: DATABASE_URL,
     ssl: {
-        rejectUnauthorized: false // Szükséges a Render SSL-hez, ha nincs CA tanúsítvány
+        rejectUnauthorized: false
     }
 });
 
 // --- Adatbázis inicializálása (táblák létrehozása, ha nem léteznek) ---
 const initializeDatabase = async () => {
     try {
-        // Táblák létrehozása
         await pool.query(`
             CREATE TABLE IF NOT EXISTS jobs (
                 id BIGINT PRIMARY KEY,
@@ -50,7 +46,7 @@ const initializeDatabase = async () => {
                 assignedTeam BIGINT[],
                 schedule VARCHAR(10)[],
                 color VARCHAR(7),
-                todoList JSONB -- JSONB típus a JSON objektumok tárolására
+                todoList JSONB
             );
             CREATE TABLE IF NOT EXISTS team (
                 id BIGINT PRIMARY KEY,
@@ -65,12 +61,11 @@ const initializeDatabase = async () => {
         console.log('[BACKEND] Adatbázis táblák ellenőrizve/létrehozva.');
 
         const jobCountResult = await pool.query('SELECT COUNT(*) FROM jobs');
-        const jobCount = parseInt(jobCountResult.rows[0].count, 10); // Konvertálás számmá
+        const jobCount = parseInt(jobCountResult.rows[0].count, 10);
         
         const teamCountResult = await pool.query('SELECT COUNT(*) FROM team');
-        const teamCount = parseInt(teamCountResult.rows[0].count, 10); // Konvertálás számmá
+        const teamCount = parseInt(teamCountResult.rows[0].count, 10);
 
-        // Csak akkor szúrunk be alap adatokat, ha MINDEN tábla üres
         if (jobCount === 0 && teamCount === 0) {
             console.log('[BACKEND] Adatbázis üres, alap adatok beszúrása.');
             await insertInitialData();
@@ -84,14 +79,14 @@ const initializeDatabase = async () => {
 };
 
 const insertInitialData = async () => {
-    for (const job of initialJobs) { // Használjuk a fájl elején definiált initialJobs-ot
+    for (const job of initialJobs) {
         await pool.query(
             `INSERT INTO jobs (id, title, status, deadline, description, assignedTeam, schedule, color, todoList)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [job.id, job.title, job.status, job.deadline, job.description, job.assignedTeam, job.schedule, job.color, JSON.stringify(job.todoList)]
         );
     }
-    for (const member of initialTeam) { // Használjuk a fájl elején definiált initialTeam-et
+    for (const member of initialTeam) {
         await pool.query(
             `INSERT INTO team (id, name, role, color, phone, email, availability)
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -102,24 +97,21 @@ const insertInitialData = async () => {
 };
 
 // --- Autentikációs Middleware ---
-// Ellenőrzi a token érvényességét minden /api/ kérésnél, kivéve a login-t
 const authenticateToken = (req, res, next) => {
     if (req.path === '/login' || req.path === '/version') {
         return next();
     }
 
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // "Bearer TOKEN" formátum
+    const token = authHeader && authHeader.split(' ')[1];
 
     if (token == null) {
-        console.log('[BACKEND] Hiba (401): Hiányzó token a nem-login kérésben.');
         return res.status(401).json({ message: 'Hozzáférés megtagadva: Hiányzó token.' });
     }
 
-    if (token === FAKE_TOKEN) { // Egyszerű token ellenőrzés
+    if (token === FAKE_TOKEN) {
         next();
     } else {
-        console.log('[BACKEND] Hiba (403): Érvénytelen token.');
         return res.status(403).json({ message: 'Hozzáférés megtagadva: Érvénytelen token.' });
     }
 };
@@ -146,28 +138,16 @@ app.get('/api/version', (req, res) => {
 // --- API végpontok: MUNKÁK (jobs) ---
 
 // Munkák lekérése
-app.post('/api/jobs', async (req, res) => {
+app.get('/api/jobs', async (req, res) => {
     try {
-        // A frontend nem küld ID-t, a backend generálja
-        const newJob = { 
-            id: Date.now(), 
-            ...req.body,
-            // Biztosítjuk, hogy a todoList mindig létezzen (üres tömbként), ha a frontend nem küldi
-            todoList: req.body.todoList || [] 
-        };
-        console.log("[BACKEND] Új munka létrehozása. Adatok:", newJob);
-        
-        await pool.query(
-            `INSERT INTO jobs (id, title, status, deadline, description, assignedTeam, schedule, color, todoList)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-            // FONTOS: Itt a 'newJob.todoList'-et használjuk, nem a 'newJob.todolist'-et
-            [newJob.id, newJob.title, newJob.status, newJob.deadline, newJob.description, newJob.assignedTeam, newJob.schedule, newJob.color, JSON.stringify(newJob.todoList)]
-        );
-        console.log("[BACKEND] Új munka sikeresen beszúrva az adatbázisba.");
-        
-        res.status(201).json(newJob);
+        const result = await pool.query('SELECT * FROM jobs');
+        const jobs = result.rows.map(job => ({
+            ...job,
+            todoList: job.todolist || [] // Biztosítjuk, hogy mindig tömb legyen
+        }));
+        res.json(jobs);
     } catch (error) {
-        console.error('[BACKEND] Hiba új munka hozzáadásakor:', error);
+        console.error('[BACKEND] Hiba munkák lekérésekor:', error);
         res.status(500).json({ message: 'Belső szerverhiba' });
     }
 });
@@ -175,13 +155,18 @@ app.post('/api/jobs', async (req, res) => {
 // Új munka hozzáadása
 app.post('/api/jobs', async (req, res) => {
     try {
-        // A frontend nem küld ID-t, a backend generálja
-        const newJob = { id: Date.now(), ...req.body };
+        const newJob = { 
+            id: Date.now(), 
+            ...req.body,
+            todoList: req.body.todoList || []
+        };
+        console.log("[BACKEND] Új munka létrehozása. Adatok:", newJob);
         await pool.query(
             `INSERT INTO jobs (id, title, status, deadline, description, assignedTeam, schedule, color, todoList)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [newJob.id, newJob.title, newJob.status, newJob.deadline, newJob.description, newJob.assignedTeam, newJob.schedule, newJob.color, JSON.stringify(newJob.todoList)]
         );
+        console.log("[BACKEND] Új munka sikeresen beszúrva az adatbázisba.");
         res.status(201).json(newJob);
     } catch (error) {
         console.error('[BACKEND] Hiba új munka hozzáadásakor:', error);
@@ -207,7 +192,7 @@ app.put('/api/jobs/:id', async (req, res) => {
             console.log(`[BACKEND] Hiba: Munka (ID: ${jobId}) nem található frissítéskor.`);
             return res.status(404).json({ message: 'Munka nem található.' });
         }
-        res.json({ ...result.rows[0], todoList: result.rows[0].todolist || [] }); // Itt is 'todoList'-et használunk!
+        res.json({ ...result.rows[0], todoList: result.rows[0].todolist || [] }); // Visszaadjuk a frissített objektumot
     } catch (error) {
         console.error('[BACKEND] Hiba munka frissítésekor:', error);
         res.status(500).json({ message: 'Belső szerverhiba' });
@@ -247,7 +232,6 @@ app.get('/api/team', async (req, res) => {
 // Új csapattag hozzáadása
 app.post('/api/team', async (req, res) => {
     try {
-        // A frontend nem küld ID-t, a backend generálja
         const newMember = { id: Date.now(), ...req.body };
         await pool.query(
             `INSERT INTO team (id, name, role, color, phone, email, availability)
@@ -304,8 +288,8 @@ app.delete('/api/team/:id', async (req, res) => {
 
 
 // Server indítása
-app.listen(PORT, async () => { // Async függvény, mert initializeDatabase async
+app.listen(PORT, async () => {
     console.log('[BACKEND] Server starting...');
-    await initializeDatabase(); // Adatbázis inicializálása
+    await initializeDatabase();
     console.log(`[BACKEND] Server running on http://localhost:${PORT}, Version: ${APP_VERSION}`);
 });
