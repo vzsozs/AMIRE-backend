@@ -8,7 +8,17 @@ const PORT = 3001; // A backend egy másik porton fut, mint a frontend
 
 // --- Middleware-ek ---
 app.use(cors()); // Engedélyezzük a CORS-t, hogy a frontendről is lehessen hívni
-app.use(express.json()); // JSON formátumú kérések feldolgozása (Express beépített body-parser)
+app.use(express.json({ limit: '10mb' })); // FONTOS: Megnöveljük a limitet, hátha ez a gond
+app.use(express.urlencoded({ limit: '10mb', extended: true })); // FONTOS: URL-kódolt body-khoz is
+
+// FONTOS: Express hibakezelő middleware a body-parser hibák elkapására
+app.use((err, req, res, next) => {
+    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+        console.error('[BACKEND] Hibás JSON a kérésben:', err.message);
+        return res.status(400).send({ message: 'Hibás JSON formátum.' }); // Bad request
+    }
+    next();
+});
 
 // --- Konfiguráció ---
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://user:password@localhost:5432/database'; 
@@ -155,18 +165,25 @@ app.get('/api/jobs', async (req, res) => {
 // Új munka hozzáadása
 app.post('/api/jobs', async (req, res) => {
     try {
+        if (!req.body) {
+            console.error('[BACKEND] Hiba: Üres req.body a POST /api/jobs végponton.');
+            return res.status(400).json({ message: 'Hiányzó kérés törzs.' });
+        }
+
         const newJob = { 
             id: Date.now(), 
             ...req.body,
             todoList: req.body.todoList || []
         };
         console.log("[BACKEND] Új munka létrehozása. Adatok:", newJob);
+        
         await pool.query(
             `INSERT INTO jobs (id, title, status, deadline, description, assignedTeam, schedule, color, todoList)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [newJob.id, newJob.title, newJob.status, newJob.deadline, newJob.description, newJob.assignedTeam, newJob.schedule, newJob.color, JSON.stringify(newJob.todoList)]
         );
         console.log("[BACKEND] Új munka sikeresen beszúrva az adatbázisba.");
+        
         res.status(201).json(newJob);
     } catch (error) {
         console.error('[BACKEND] Hiba új munka hozzáadásakor:', error);
