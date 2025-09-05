@@ -1,47 +1,34 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-const path = require('path');
 
 const app = express();
 const PORT = 3001;
 
 // --- Middleware-ek ---
 app.use(cors());
-// FONTOS: Explicit limitet adunk a JSON parser-nek
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// FONTOS: Express hibakezelő middleware a body-parser hibák elkapására
-app.use((err, req, res, next) => {
-    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
-        console.error('[BACKEND] Hibás JSON a kérésben:', err.message);
-        return res.status(400).send({ message: 'Hibás JSON formátum.' });
-    }
-    next();
-});
+app.use(express.json());
 
 // --- Konfiguráció ---
-const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://user:password@localhost:5432/database';
+const DATABASE_URL = process.env.DATABASE_URL;
 const USERNAME = process.env.AMIRE_USERNAME || 'admin';
 const PASSWORD = process.env.AMIRE_PASSWORD || 'admin';
 const FAKE_TOKEN = process.env.AMIRE_FAKE_TOKEN || 'amire-secret-token-xyz';
 const APP_VERSION = '1.0.0';
 
-// --- PostgreSQL Pool létrehozása ---
 const pool = new Pool({
     connectionString: DATABASE_URL,
-    ssl: {
-        rejectUnauthorized: false
-    }
+    ssl: { rejectUnauthorized: false }
 });
 
-// --- Adatbázis inicializálása (táblák létrehozása, ha nem léteznek) ---
+// --- Adatbázis inicializálása ---
 const initializeDatabase = async () => {
     try {
+        // FONTOS: Az 'id' oszlopot BIGSERIAL-re cseréljük!
+        // Ez egy auto-inkrementált 64-bites egész szám.
         await pool.query(`
             CREATE TABLE IF NOT EXISTS jobs (
-                id BIGINT PRIMARY KEY,
+                id BIGSERIAL PRIMARY KEY,
                 title VARCHAR(255) NOT NULL,
                 status VARCHAR(50),
                 deadline VARCHAR(10),
@@ -52,7 +39,7 @@ const initializeDatabase = async () => {
                 todoList JSONB
             );
             CREATE TABLE IF NOT EXISTS team (
-                id BIGINT PRIMARY KEY,
+                id BIGSERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 role VARCHAR(255),
                 color VARCHAR(7),
@@ -61,42 +48,28 @@ const initializeDatabase = async () => {
                 availability VARCHAR(10)[]
             );
         `);
-        console.log('[BACKEND] Adatbázis táblák ellenőrizve/létrehozva.');
-
-        const jobCountResult = await pool.query('SELECT COUNT(*) FROM jobs');
-        const jobCount = parseInt(jobCountResult.rows[0].count, 10);
+        console.log('[BACKEND] Adatbázis táblák ellenőrizve/létrehozva (BIGSERIAL ID-vel).');
         
-        const teamCountResult = await pool.query('SELECT COUNT(*) FROM team');
-        const teamCount = parseInt(teamCountResult.rows[0].count, 10);
-
-        if (jobCount === 0 && teamCount === 0) {
-            console.log('[BACKEND] Adatbázis üres, alap adatok beszúrása.');
-            await insertInitialData();
-        } else {
-            console.log(`[BACKEND] Adatbázis már tartalmaz adatokat. Munkák: ${jobCount}, Csapat: ${teamCount}.`);
+        const jobCountResult = await pool.query('SELECT COUNT(*) FROM jobs');
+        if (parseInt(jobCountResult.rows[0].count, 10) === 0) {
+            console.log('[BACKEND] Jobs tábla üres, alap adat beszúrása.');
+            await pool.query(
+                `INSERT INTO jobs (title, status, deadline, description, assignedTeam, schedule, color, todoList) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                ['Teszt munka', 'Folyamatban', '2025-09-10', 'Ez egy alapértelmezett teszt munka.', [1], ['2025-09-01', '2025-09-02'], '#FF6F00', JSON.stringify([{ id: Date.now(), text: 'Teszt feladat', completed: false }])]
+            );
         }
 
+        const teamCountResult = await pool.query('SELECT COUNT(*) FROM team');
+        if (parseInt(teamCountResult.rows[0].count, 10) === 0) {
+            console.log('[BACKEND] Team tábla üres, alap adat beszúrása.');
+            await pool.query(
+                `INSERT INTO team (name, role, color, phone, email, availability) VALUES ($1, $2, $3, $4, $5, $6)`,
+                ['Béla', 'Segédmunkás', '#1E88E5', '+36701234567', 'bela@amire.hu', ['2025-09-01', '2025-09-02']]
+            );
+        }
     } catch (error) {
         console.error('[BACKEND] Hiba az adatbázis inicializálása során:', error);
     }
-};
-
-const insertInitialData = async () => {
-    for (const job of initialJobs) {
-        await pool.query(
-            `INSERT INTO jobs (id, title, status, deadline, description, assignedTeam, schedule, color, todoList)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-            [job.id, job.title, job.status, job.deadline, job.description, job.assignedTeam, job.schedule, job.color, JSON.stringify(job.todoList)]
-        );
-    }
-    for (const member of initialTeam) {
-        await pool.query(
-            `INSERT INTO team (id, name, role, color, phone, email, availability)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [member.id, member.name, member.role, member.color, member.phone, member.email, member.availability]
-        );
-    }
-    console.log('[BACKEND] Alap adatok sikeresen beszúrva.');
 };
 
 // --- Autentikációs Middleware ---
@@ -159,29 +132,24 @@ app.get('/api/jobs', async (req, res) => {
 // Új munka hozzáadása
 app.post('/api/jobs', async (req, res) => {
     try {
-        if (!req.body) {
-            console.error('[BACKEND] Hiba: Üres req.body a POST /api/jobs végponton.');
-            return res.status(400).json({ message: 'Hiányzó kérés törzs.' });
-        }
         const { title, status, deadline, description, assignedTeam, schedule, color, todoList } = req.body;
-        const newJob = {
-            id: Date.now(),
-            title: title || 'Nincs cím',
-            status: status || 'Függőben',
-            deadline: deadline || null,
-            description: description || '',
-            assignedTeam: Array.isArray(assignedTeam) ? assignedTeam.map(Number) : [],
-            schedule: schedule || [],
-            color: color || '#607D8B',
-            todoList: todoList || []
-        };
-        console.log("[BACKEND] Új munka létrehozása. Adatok:", newJob);
-        await pool.query(
-            `INSERT INTO jobs (id, title, status, deadline, description, assignedTeam, schedule, color, todoList)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-            [newJob.id, newJob.title, newJob.status, newJob.deadline, newJob.description, newJob.assignedTeam, newJob.schedule, newJob.color, JSON.stringify(newJob.todoList)]
+        // Az adatbázis generálja az ID-t, a RETURNING * visszaadja a teljes sort
+        const result = await pool.query(
+            `INSERT INTO jobs (title, status, deadline, description, assignedTeam, schedule, color, todoList)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+            [
+                title || 'Nincs cím',
+                status || 'Függőben',
+                deadline || null,
+                description || '',
+                Array.isArray(assignedTeam) ? assignedTeam.map(Number) : [],
+                schedule || [],
+                color || '#607D8B',
+                JSON.stringify(todoList || [])
+            ]
         );
-        console.log("[BACKEND] Új munka sikeresen beszúrva az adatbázisba.");
+        const newJob = { ...result.rows[0], todolist: result.rows[0].todolist || [] };
+        console.log("[BACKEND] Új munka sikeresen beszúrva. Visszaadott adat:", newJob);
         res.status(201).json(newJob);
     } catch (error) {
         console.error('[BACKEND] Hiba új munka hozzáadásakor:', error);
@@ -192,7 +160,7 @@ app.post('/api/jobs', async (req, res) => {
 // Munka frissítése
 app.put('/api/jobs/:id', async (req, res) => {
     try {
-        const jobId = Number(req.params.id);
+        const jobId = req.params.id; // Stringként kezeljük, a PostgreSQL tudja kezelni
         const { title, status, deadline, description, assignedTeam, schedule, color, todoList } = req.body;
         
         const result = await pool.query(
@@ -217,7 +185,7 @@ app.put('/api/jobs/:id', async (req, res) => {
 // Munka törlése
 app.delete('/api/jobs/:id', async (req, res) => {
     try {
-        const jobId = Number(req.params.id);
+        const jobId = req.params.id; // Stringként kezeljük
         const result = await pool.query('DELETE FROM jobs WHERE id = $1 RETURNING id', [jobId]);
 
         if (result.rows.length === 0) {
